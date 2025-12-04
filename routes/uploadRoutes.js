@@ -23,7 +23,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const fileExtension = path.extname(file.originalname);
+    const fileExtension = path.extname(file.originalname).toLowerCase();
     cb(null, "file-" + uniqueSuffix + fileExtension);
   }
 });
@@ -46,7 +46,17 @@ const upload = multer({
   }
 });
 
-// Upload endpoint - RETURN RELATIVE PATH ONLY
+// Get server base URL
+const getServerBaseUrl = (req) => {
+  // In production on Render, use the Render URL
+  if (process.env.NODE_ENV === 'production') {
+    return `https://${req.get('host')}`;
+  }
+  // In development
+  return `http://${req.get('host')}`;
+};
+
+// Upload endpoint - FIXED FOR RENDER
 router.post("/upload", upload.single("file"), (req, res) => {
   try {
     console.log("📁 Upload request received");
@@ -61,21 +71,65 @@ router.post("/upload", upload.single("file"), (req, res) => {
 
     console.log("✅ File uploaded:", req.file.filename);
     console.log("📁 File saved at:", req.file.path);
+    console.log("📁 File mimetype:", req.file.mimetype);
 
-    // RETURN ONLY RELATIVE PATH - This is the key change
-    const fileName = req.file.filename;
-    const relativePath = `/uploads/${fileName}`;
+    // Get server base URL
+    const baseUrl = getServerBaseUrl(req);
     
-    console.log("📁 Stored relative path:", relativePath);
+    // Determine file type
+    const isImage = req.file.mimetype.startsWith('image/');
+    const isVideo = req.file.mimetype.startsWith('video/');
+    
+    // Create full URL for the file
+    const fileName = req.file.filename;
+    const fileUrl = `${baseUrl}/uploads/${fileName}`;
+    
+    console.log("🌐 Generated file URL:", fileUrl);
+    console.log("📁 File type:", isImage ? "Image" : isVideo ? "Video" : "Other");
 
     res.json({
       success: true,
       message: "File uploaded successfully",
       fileName: fileName,
-      filePath: relativePath // Just the relative path
+      filePath: fileUrl, // Full URL for frontend
+      fileType: isImage ? "image" : isVideo ? "video" : "other",
+      mimetype: req.file.mimetype
     });
   } catch (error) {
     console.error("❌ Upload error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Get list of uploaded files
+router.get("/uploads", (req, res) => {
+  try {
+    const files = fs.readdirSync(uploadsDir);
+    const baseUrl = getServerBaseUrl(req);
+    
+    const fileList = files.map(file => {
+      const filePath = path.join(uploadsDir, file);
+      const stats = fs.statSync(filePath);
+      const fileUrl = `${baseUrl}/uploads/${file}`;
+      
+      return {
+        name: file,
+        url: fileUrl,
+        size: stats.size,
+        created: stats.birthtime
+      };
+    });
+    
+    res.json({
+      success: true,
+      count: fileList.length,
+      files: fileList
+    });
+  } catch (error) {
+    console.error("❌ List files error:", error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
