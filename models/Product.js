@@ -49,5 +49,5 @@ productSchema.index({ category: 1, brand: 1 });
 productSchema.index({ created_at: -1 });
 
 const Product = mongoose.model('Product', productSchema);
-
-export default Product;
+ 
+export default Product; 

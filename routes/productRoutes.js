@@ -1,8 +1,42 @@
 import express from "express";
-import mongoose from 'mongoose'; // ✅ ADD THIS IMPORT
+import mongoose from 'mongoose';
 import Product from "../models/Product.js";
+import cloudinary from "cloudinary";
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const router = express.Router();
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Helper function to extract public ID from Cloudinary URL
+const extractPublicId = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  
+  try {
+    // Cloudinary URL format: https://res.cloudinary.com/cloud_name/image/upload/v1234567890/folder/filename.jpg
+    const urlParts = url.split('/');
+    const uploadIndex = urlParts.indexOf('upload');
+    
+    if (uploadIndex !== -1 && uploadIndex + 1 < urlParts.length) {
+      // Get everything after 'upload/' and before the file extension
+      const pathAfterUpload = urlParts.slice(uploadIndex + 1).join('/');
+      const publicId = pathAfterUpload.replace(/\.[^/.]+$/, ""); // Remove file extension
+      return publicId;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Error extracting public ID:", error);
+    return null;
+  }
+};
 
 // GET ALL PRODUCTS
 router.get("/products", async (req, res) => {
@@ -30,7 +64,6 @@ router.get("/products/:id", async (req, res) => {
   try {
     const productId = req.params.id;
     
-    // Validate MongoDB ObjectId
     if (!mongoose.Types.ObjectId.isValid(productId)) {
       return res.status(400).json({ 
         success: false, 
@@ -63,7 +96,6 @@ router.get("/products/:id", async (req, res) => {
 // CREATE NEW PRODUCT
 router.post("/products", async (req, res) => {
   console.log("📨 Received POST /products request");
-  console.log("📦 Request body:", req.body);
   
   if (!req.body || Object.keys(req.body).length === 0) {
     return res.status(400).json({ 
@@ -114,7 +146,6 @@ router.post("/products", async (req, res) => {
   } catch (err) {
     console.error("❌ Create Product Error:", err.message);
     
-    // Handle Mongoose validation errors
     if (err.name === 'ValidationError') {
       const errors = Object.values(err.errors).map(error => error.message);
       return res.status(400).json({ 
@@ -135,7 +166,6 @@ router.put("/products/:id", async (req, res) => {
   try {
     const productId = req.params.id;
     
-    // Validate MongoDB ObjectId
     if (!mongoose.Types.ObjectId.isValid(productId)) {
       return res.status(400).json({ 
         success: false, 
@@ -186,7 +216,6 @@ router.put("/products/:id", async (req, res) => {
   } catch (err) {
     console.error("❌ Update Product Error:", err.message);
     
-    // Handle Mongoose validation errors
     if (err.name === 'ValidationError') {
       const errors = Object.values(err.errors).map(error => error.message);
       return res.status(400).json({ 
@@ -202,12 +231,11 @@ router.put("/products/:id", async (req, res) => {
   }
 });
 
-// DELETE PRODUCT
+// DELETE PRODUCT with Cloudinary cleanup
 router.delete("/products/:id", async (req, res) => {
   try {
     const productId = req.params.id;
     
-    // Validate MongoDB ObjectId
     if (!mongoose.Types.ObjectId.isValid(productId)) {
       return res.status(400).json({ 
         success: false, 
@@ -223,7 +251,33 @@ router.delete("/products/:id", async (req, res) => {
         error: "Product not found" 
       });
     }
-//   hjkk
+
+    // Delete files from Cloudinary if they exist
+    if (existingProduct.image_url) {
+      const imagePublicId = extractPublicId(existingProduct.image_url);
+      if (imagePublicId) {
+        try {
+          await cloudinary.v2.uploader.destroy(imagePublicId);
+          console.log(`✅ Deleted image from Cloudinary: ${imagePublicId}`);
+        } catch (cloudinaryError) {
+          console.error(`⚠️ Error deleting image from Cloudinary: ${cloudinaryError.message}`);
+        }
+      }
+    }
+
+    if (existingProduct.video_url) {
+      const videoPublicId = extractPublicId(existingProduct.video_url);
+      if (videoPublicId) {
+        try {
+          await cloudinary.v2.uploader.destroy(videoPublicId, { resource_type: 'video' });
+          console.log(`✅ Deleted video from Cloudinary: ${videoPublicId}`);
+        } catch (cloudinaryError) {
+          console.error(`⚠️ Error deleting video from Cloudinary: ${cloudinaryError.message}`);
+        }
+      }
+    }
+
+    // Delete product from database
     await Product.findByIdAndDelete(productId);
 
     res.json({ 
@@ -238,5 +292,5 @@ router.delete("/products/:id", async (req, res) => {
     });
   }
 });
-
+ 
 export default router;
